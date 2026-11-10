@@ -17,7 +17,7 @@ from rules import Debt, decide  # noqa: E402
 sent: list[tuple[str, str]] = []
 appmod.messenger.send_instagram = lambda rid, t: sent.append((rid, t)) or True
 client = TestClient(appmod.app)
-AUTH = ("admin", "parol")
+client.post("/admin/login", data={"username": "admin", "password": "parol"})
 
 
 # ---------- qoidalar
@@ -79,13 +79,13 @@ def test_webhook_verify():
 
 def test_flow_to_lead():
     run_full_dialog("u1")
-    assert client.get("/admin", auth=AUTH).status_code == 200
+    assert client.get("/admin").status_code == 200
     sent.clear()
-    r = client.post("/admin/check/u1", data={"none": "1"}, auth=AUTH, follow_redirects=False)
+    r = client.post("/admin/check/u1", data={"none": "1"}, follow_redirects=False)
     assert r.status_code == 303
     assert db.get("u1")["status"] == "lead"
     assert "qabul qilindi" in sent[-1][1]
-    csv_text = client.get("/admin/leads.csv", auth=AUTH).text
+    csv_text = client.get("/admin/leads.csv").text
     assert "AD1234567" in csv_text
 
 
@@ -94,7 +94,7 @@ def test_flow_to_reject():
     sent.clear()
     client.post("/admin/check/u2", data={"type": ["aliment", "", "", "", ""],
                                          "amount": ["3000000", "", "", "", ""]},
-                auth=AUTH, follow_redirects=False)
+                follow_redirects=False)
     assert db.get("u2")["status"] == "rad"
     assert "aliment" in sent[-1][1]
 
@@ -103,7 +103,7 @@ def test_fine_under_limit_lead():
     run_full_dialog("u3")
     client.post("/admin/check/u3", data={"type": ["yol_jarima", "", "", "", ""],
                                          "amount": ["800000", "", "", "", ""]},
-                auth=AUTH, follow_redirects=False)
+                follow_redirects=False)
     assert db.get("u3")["status"] == "lead"
 
 
@@ -113,5 +113,9 @@ def test_no_consent():
     assert db.get("u4")["status"] == "rozilik_yoq"
 
 
-def test_admin_requires_password():
-    assert client.get("/admin").status_code == 401
+def test_admin_requires_login():
+    anon = TestClient(appmod.app)
+    r = anon.get("/admin", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/admin/login"
+    r = anon.post("/admin/login", data={"username": "admin", "password": "xato"}, follow_redirects=False)
+    assert "error=1" in r.headers["location"]

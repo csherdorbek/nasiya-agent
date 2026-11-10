@@ -8,12 +8,13 @@ import io
 import json
 import logging
 import os
+import hashlib
+import hmac
 import secrets
 from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 import bot
 import db
@@ -29,7 +30,6 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "")
 
 app = FastAPI(title="Nasiya agenti")
-security = HTTPBasic()
 db.init()
 
 
@@ -72,15 +72,53 @@ async def receive(request: Request):
 
 # ---------------------------------------------------------------- admin
 
-def admin(creds: HTTPBasicCredentials = Depends(security)):
+COOKIE = "nasiya_admin"
+
+
+def _session_value() -> str:
+    """Parolga bog'langan imzo: parol o'zgarsa, eski sessiyalar bekor bo'ladi."""
+    return hmac.new(ADMIN_PASSWORD.encode(), f"{ADMIN_USER}:session".encode(), hashlib.sha256).hexdigest()
+
+
+def admin(request: Request):
     if not ADMIN_PASSWORD:
         raise HTTPException(503, "ADMIN_PASSWORD o'rnatilmagan")
-    ok = secrets.compare_digest(creds.username, ADMIN_USER) and secrets.compare_digest(
-        creds.password, ADMIN_PASSWORD
-    )
+    if secrets.compare_digest(request.cookies.get(COOKIE, ""), _session_value()):
+        return ADMIN_USER
+    raise HTTPException(303, headers={"Location": "/admin/login"})
+
+
+@app.get("/admin/login", response_class=HTMLResponse)
+def login_form(error: int = 0):
+    msg = "<p style='color:#b42318'>Login yoki parol noto'g'ri</p>" if error else ""
+    return page("Kirish", f"""
+<h1>Menejer paneli</h1>{msg}
+<form method=post style='max-width:320px'>
+<p><label>Login<br><input name=username value='admin' style='width:100%'></label></p>
+<p><label>Parol<br><input name=password type=password autofocus style='width:100%'></label></p>
+<p><button class=btn>Kirish</button></p>
+</form>""")
+
+
+@app.post("/admin/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    ok = bool(ADMIN_PASSWORD) and secrets.compare_digest(
+        str(form.get("username", "")), ADMIN_USER
+    ) and secrets.compare_digest(str(form.get("password", "")), ADMIN_PASSWORD)
     if not ok:
-        raise HTTPException(401, "Login yoki parol noto'g'ri", {"WWW-Authenticate": "Basic"})
-    return creds.username
+        return RedirectResponse("/admin/login?error=1", status_code=303)
+    r = RedirectResponse("/admin", status_code=303)
+    r.set_cookie(COOKIE, _session_value(), httponly=True, secure=PUBLIC_URL.startswith("https"),
+                 samesite="lax", max_age=30 * 86400)
+    return r
+
+
+@app.get("/admin/logout")
+def logout():
+    r = RedirectResponse("/admin/login", status_code=303)
+    r.delete_cookie(COOKIE)
+    return r
 
 
 CSS = """
@@ -133,7 +171,8 @@ def dashboard(_: str = Depends(admin)):
 
     body = (
         "<h1>Nasiya arizalari</h1>"
-        "<p><a class='btn green' href='/admin/leads.csv'>Leadlarni Excel'ga (CSV)</a></p>"
+        "<p><a class='btn green' href='/admin/leads.csv'>Leadlarni Excel'ga (CSV)</a> "
+        "&nbsp;<a href='/admin/logout' class=muted>Chiqish</a></p>"
         "<h2>MIB tekshiruvini kutmoqda</h2>" + table(db.by_status("mib_tekshiruvida"), True)
         + "<h2>Leadlar</h2>" + table(db.by_status("lead"), show_decision=True)
         + "<h2>Rad etilganlar</h2>" + table(db.by_status("rad"), show_decision=True)
