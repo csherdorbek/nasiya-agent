@@ -40,7 +40,7 @@ cp .env.example .env      # qiymatlarni to'ldiring
 export $(cat .env | xargs)
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
-yoki Docker: `docker build -t nasiya . && docker run -p 8000:8000 --env-file .env -v nasiya:/data nasiya`  (Railway: Volume /data ga ulanadi)`
+yoki Docker: `docker build -t nasiya . && docker run -p 8000:8000 --env-file .env -v nasiya:/data nasiya`  (Railway: Volume /data ga ulanadi)
 
 ### 2. Instagram'ni ulash (bir marta)
 1. Instagram akkauntni **Professional (Business)** ga o'tkazing.
